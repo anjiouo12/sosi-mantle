@@ -25,6 +25,7 @@ export default function Home() {
   const [showModal, setShowModal] = useState(false);
   const [topRanks, setTopRanks] = useState<RankItem[]>([]);
   const [loadingRanks, setLoadingRanks] = useState(false);
+  const [resetting, setResetting] = useState(false);
 
   // 하루 게임 플레이 제한 (최대 3판) 관련 상태
   const [completedGames, setCompletedGames] = useState<number>(0);
@@ -32,16 +33,13 @@ export default function Home() {
   // 입력창 포커스 유지를 위한 Ref
   const inputRef = useRef<HTMLInputElement>(null);
 
-  // 접속 및 초기화 시 자동 포커스 및 오늘 완료한 게임 수 체크
   useEffect(() => {
     inputRef.current?.focus();
 
-    // 접속 시 오늘 날짜 기준 플레이한 게임 횟수 불러오기
     const today = new Date().toISOString().slice(0, 10);
     const savedData = JSON.parse(localStorage.getItem("game_play_limit") || "{}");
 
     if (savedData.date !== today) {
-      // 날짜가 지나면 완료한 게임 수 0으로 초기화
       setCompletedGames(0);
       localStorage.setItem("game_play_limit", JSON.stringify({ date: today, games: 0 }));
     } else {
@@ -49,7 +47,6 @@ export default function Home() {
     }
   }, []);
 
-  // 점수에 따른 색상 및 이모지 반환
   const getScoreBadge = (rank: number, score: number) => {
     if (rank === 1) return { emoji: "🎉", color: "bg-red-500", text: "text-red-500" };
     if (rank <= 10) return { emoji: "🔥", color: "bg-orange-500", text: "text-orange-500" };
@@ -59,7 +56,6 @@ export default function Home() {
     return { emoji: "❄️", color: "bg-blue-300", text: "text-blue-500" };
   };
 
-  // 백엔드에서 TOP 100 순위 데이터 불러오기
   async function fetchTopRanks() {
     setLoadingRanks(true);
     try {
@@ -78,27 +74,52 @@ export default function Home() {
     }
   }
 
+  // 다음 문제로 넘어가는 정답 리셋 함수
+  async function handleNextGame() {
+    if (completedGames >= 3) {
+      alert("오늘 할당된 3번의 기회를 모두 완료하셨습니다!");
+      return;
+    }
+
+    setResetting(true);
+    try {
+      const apiUrl = process.env.NEXT_PUBLIC_API_URL || "http://127.0.0.1:8000";
+      const res = await fetch(`${apiUrl}/reset-answer`, { method: "POST" });
+
+      if (res.ok) {
+        setGuesses([]);
+        setIsGameWon(false);
+        setMessage("");
+        setInput("");
+        setTimeout(() => inputRef.current?.focus(), 50);
+      } else {
+        alert("새 문제를 불러오지 못했습니다.");
+      }
+    } catch (e) {
+      console.error(e);
+      alert("서버 통신에 실패했습니다.");
+    } finally {
+      setResetting(false);
+    }
+  }
+
   async function handleSubmit() {
     const trimmedInput = input.trim();
 
-    // 입력값이 없거나 이미 로딩 중인 경우 리턴
     if (!trimmedInput || loading) return;
 
-    // 하루 3판 게임 모두 완료했는지 체크 (이미 성공한 경우나 판수 초과 시)
     if (completedGames >= 3) {
       setMessage("⚠️ 오늘 플레이할 수 있는 3번의 기회를 모두 사용하셨습니다. 내일 다시 도전해 주세요!");
       setInput("");
       return;
     }
 
-    // 한글 검사
     const koreanRegex = /^[가-힣]+$/;
     if (!koreanRegex.test(trimmedInput)) {
       setMessage("⚠️ 완성된 한글 단어만 입력해 주세요.");
       return;
     }
 
-    // 중복 체크
     if (guesses.some((g) => g.word === trimmedInput)) {
       setMessage("이미 입력한 단어입니다.");
       setInput("");
@@ -135,7 +156,6 @@ export default function Home() {
       setGuesses((prev) => [...prev, newGuess].sort((a, b) => b.score - a.score));
       setInput("");
 
-      // --- [수정] 정답을 맞혔을 때 완료한 게임 횟수 1 증가 ---
       if (result.answer) {
         setMessage("🎉 정답입니다! 축하합니다!");
         setIsGameWon(true);
@@ -150,10 +170,7 @@ export default function Home() {
       setMessage("⚠️ 서버 통신 실패 (백엔드 서버를 확인하세요)");
     } finally {
       setLoading(false);
-      // 서버 요청 완료 후 포커스 재설정
-      setTimeout(() => {
-        inputRef.current?.focus();
-      }, 50);
+      setTimeout(() => inputRef.current?.focus(), 50);
     }
   }
 
@@ -166,13 +183,11 @@ export default function Home() {
         <p className="text-sm text-gray-500 mb-1 text-center">
           단어를 입력해서 정답과 얼마나 가까운지 맞춰보세요.
         </p>
-        
-        {/* 남은 게임 플레이 기회 안내 */}
+
         <p className="text-xs font-medium text-amber-600 mb-6 text-center">
           💡 하루에 최대 3개의 문제(게임)까지 도전 가능합니다. (오늘 완료한 문제: {completedGames} / 3)
         </p>
 
-        {/* 입력 폼 영역 */}
         <form
           onSubmit={(e) => {
             e.preventDefault();
@@ -206,24 +221,35 @@ export default function Home() {
           </button>
         </form>
 
-        {/* 안내 메시지 및 정답 시 TOP 100 보기 버튼 */}
         {message && (
           <div className="mt-1 flex flex-col items-center gap-2 w-full">
             <p className="text-sm font-semibold text-center text-red-500">{message}</p>
             {isGameWon && (
-              <button
-                type="button"
-                onClick={fetchTopRanks}
-                disabled={loadingRanks}
-                className="mt-1 bg-amber-500 text-white text-xs px-4 py-2.5 rounded-lg font-bold hover:bg-amber-600 transition shadow cursor-pointer"
-              >
-                {loadingRanks ? "불러오는 중..." : "🏆 정답 유사도 TOP 100 보기"}
-              </button>
+              <div className="flex gap-2 mt-1">
+                <button
+                  type="button"
+                  onClick={fetchTopRanks}
+                  disabled={loadingRanks}
+                  className="bg-amber-500 text-white text-xs px-4 py-2.5 rounded-lg font-bold hover:bg-amber-600 transition shadow cursor-pointer"
+                >
+                  {loadingRanks ? "불러오는 중..." : "🏆 TOP 100 보기"}
+                </button>
+
+                {completedGames < 3 && (
+                  <button
+                    type="button"
+                    onClick={handleNextGame}
+                    disabled={resetting}
+                    className="bg-emerald-600 text-white text-xs px-4 py-2.5 rounded-lg font-bold hover:bg-emerald-700 transition shadow cursor-pointer"
+                  >
+                    {resetting ? "새 문제 준비중..." : "➡️ 다음 문제 도전하기"}
+                  </button>
+                )}
+              </div>
             )}
           </div>
         )}
 
-        {/* 추측 단어 결과 리스트 */}
         <div className="mt-6 w-full space-y-3">
           {guesses.map((g) => {
             const { emoji, color, text } = getScoreBadge(g.rank, g.score);
@@ -255,7 +281,6 @@ export default function Home() {
         </div>
       </div>
 
-      {/* 전체 순위 모달 팝업 */}
       {showModal && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-50">
           <div className="bg-white rounded-2xl w-full max-w-md p-6 max-h-[80vh] flex flex-col shadow-2xl">

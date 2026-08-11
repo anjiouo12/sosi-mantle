@@ -84,23 +84,21 @@ WORD_VECTORS = vectorizer.fit_transform(WORD_LIST)
 print("⚡ TF-IDF 벡터화 완료!")
 
 # =========================
-# 오늘의 정답
+# 오늘의 정답 & 랭킹 생성
 # =========================
 ANSWER = random.choice(ANSWER_LIST)
-print("오늘의 정답:", ANSWER)
-
 ANSWER_INDEX = WORD_LIST.index(ANSWER) if ANSWER in WORD_LIST else 0
 ANSWER_VECTOR = WORD_VECTORS[ANSWER_INDEX]
 
-# =========================
-# 랭킹 데이터 생성
-# =========================
 RANKS = {}
 SCORES = {}
 SORTED_RANK_LIST = []
 
 def create_ranking():
-    global RANKS, SCORES, SORTED_RANK_LIST
+    global RANKS, SCORES, SORTED_RANK_LIST, ANSWER, ANSWER_INDEX, ANSWER_VECTOR
+    
+    RANKS = {}
+    SCORES = {}
     result = []
 
     # 전체 유사도 한번에 계산 (속도 최적화)
@@ -124,8 +122,9 @@ def create_ranking():
             "score": item["score"]
         })
 
-    print("랭킹 생성 완료:", len(RANKS))
+    print(f"🎯 정답 설정 완료: {ANSWER} (랭킹 생성 완료: {len(RANKS)})")
 
+# 초기 랭킹 계산
 create_ranking()
 
 # =========================
@@ -188,4 +187,22 @@ def get_top_ranks(limit: int = 100):
     return {
         "answer": ANSWER,
         "top_ranks": SORTED_RANK_LIST[:limit]
+    }
+
+# --- [신규] 정답 무작위 변경 및 랭킹 재계산 엔드포인트 ---
+@app.post("/reset-answer")
+def reset_answer():
+    global ANSWER, ANSWER_INDEX, ANSWER_VECTOR
+    
+    # ANSWER_LIST 중 무작위 선택
+    ANSWER = random.choice(ANSWER_LIST)
+    ANSWER_INDEX = WORD_LIST.index(ANSWER) if ANSWER in WORD_LIST else 0
+    ANSWER_VECTOR = WORD_VECTORS[ANSWER_INDEX]
+    
+    # 새 정답 기준으로 랭킹 재계산
+    create_ranking()
+    
+    return {
+        "message": "새로운 정답으로 변경되었습니다.",
+        "success": True
     }
