@@ -4,6 +4,3 @@ kiwipiepy
 numpy
 scikit-learn
 pydantic
---find-links https://download.pytorch.org/whl/cpu/torch_stable.html
-torch==2.2.2+cpu
-sentence-transformers
