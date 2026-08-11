@@ -26,12 +26,28 @@ export default function Home() {
   const [topRanks, setTopRanks] = useState<RankItem[]>([]);
   const [loadingRanks, setLoadingRanks] = useState(false);
 
+  // 하루 3회 제한을 위한 남은 기회 상태 (초기값 3)
+  const [remainingTries, setRemainingTries] = useState<number>(3);
+
   // 입력창 포커스 유지를 위한 Ref
   const inputRef = useRef<HTMLInputElement>(null);
 
-  // 접속 및 초기화 시 자동 포커스
+  // 접속 및 초기화 시 자동 포커스 및 횟수 체크
   useEffect(() => {
     inputRef.current?.focus();
+
+    // 접속 시 오늘 날짜 기준 남은 횟수 불러오기
+    const today = new Date().toISOString().slice(0, 10);
+    const savedData = JSON.parse(localStorage.getItem('guess_limit') || '{}');
+
+    if (savedData.date !== today) {
+      // 날짜가 다르면 3회로 초기화
+      setRemainingTries(3);
+    } else {
+      // 오늘 기록이 있으면 남은 횟수 계산 (3 - 사용한 횟수)
+      const usedCount = savedData.count || 0;
+      setRemainingTries(Math.max(0, 3 - usedCount));
+    }
   }, []);
 
   // 점수에 따른 색상 및 이모지 반환
@@ -48,7 +64,8 @@ export default function Home() {
   async function fetchTopRanks() {
     setLoadingRanks(true);
     try {
-      const res = await fetch("http://127.0.0.1:8000/top-ranks?limit=100");
+      const apiUrl = process.env.NEXT_PUBLIC_API_URL || "http://127.0.0.1:8000";
+      const res = await fetch(`${apiUrl}/top-ranks?limit=100`);
       if (res.ok) {
         const data = await res.json();
         setTopRanks(data.top_ranks || []);
@@ -68,6 +85,21 @@ export default function Home() {
     // 입력값이 없거나 이미 로딩 중인 경우 리턴
     if (!trimmedInput || loading) return;
 
+    // --- [추가] 하루 3회 제한 검사 로직 ---
+    const today = new Date().toISOString().slice(0, 10);
+    let savedData = JSON.parse(localStorage.getItem('guess_limit') || '{}');
+
+    if (savedData.date !== today) {
+      savedData = { date: today, count: 0 };
+    }
+
+    if (savedData.count >= 3) {
+      setMessage("⚠️ 하루에 최대 3번까지만 도전할 수 있습니다. 내일 다시 시도해 주세요!");
+      setInput("");
+      return;
+    }
+    // ------------------------------------
+
     // 한글 검사
     const koreanRegex = /^[가-힣]+$/;
     if (!koreanRegex.test(trimmedInput)) {
@@ -86,7 +118,8 @@ export default function Home() {
     setLoading(true);
 
     try {
-      const response = await fetch("http://127.0.0.1:8000/guess", {
+      const apiUrl = process.env.NEXT_PUBLIC_API_URL || "http://127.0.0.1:8000";
+      const response = await fetch(`${apiUrl}/guess`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ guess: trimmedInput }),
@@ -101,6 +134,12 @@ export default function Home() {
         setInput("");
         return;
       }
+
+      // --- [추가] 정상적인 단어 제출 시 카운트 증가 및 저장 ---
+      savedData.count += 1;
+      localStorage.setItem('guess_limit', JSON.stringify(savedData));
+      setRemainingTries(Math.max(0, 3 - savedData.count));
+      // ----------------------------------------------------
 
       const newGuess: Guess = {
         word: trimmedInput,
@@ -119,6 +158,7 @@ export default function Home() {
       console.error(error);
       setMessage("⚠️ 서버 통신 실패 (백엔드 서버를 확인하세요)");
     } finally {
+      setLoadingRanks_or_loading: // syntax safety placeholder (uses standard setLoading)
       setLoading(false);
       // 서버 요청 완료 후 포커스 재설정
       setTimeout(() => {
@@ -133,8 +173,12 @@ export default function Home() {
         <h1 className="text-3xl font-extrabold mb-2 text-center text-gray-800 flex items-center gap-2">
           소시맨틀 🔥
         </h1>
-        <p className="text-sm text-gray-500 mb-6 text-center">
+        <p className="text-sm text-gray-500 mb-1 text-center">
           단어를 입력해서 정답과 얼마나 가까운지 맞춰보세요.
+        </p>
+        {/* 남은 기회 안내 문구 추가 */}
+        <p className="text-xs font-medium text-amber-600 mb-6 text-center">
+          💡 하루 최대 3회까지 제출 가능합니다. (남은 기회: {remainingTries}회)
         </p>
 
         {/* 입력 폼 영역 */}
@@ -151,14 +195,14 @@ export default function Home() {
             className="flex-1 border border-gray-300 px-4 py-3 rounded-xl focus:outline-none focus:ring-2 focus:ring-black text-black disabled:bg-gray-100"
             value={input}
             onChange={(e) => setInput(e.target.value)}
-            disabled={loading}
-            placeholder="단어 입력..."
+            disabled={loading || remainingTries <= 0}
+            placeholder={remainingTries > 0 ? "단어 입력..." : "오늘 기회를 모두 소모했습니다."}
             autoFocus
           />
 
           <button
             type="submit"
-            disabled={loading}
+            disabled={loading || remainingTries <= 0}
             className="bg-black text-white px-6 py-3 rounded-xl font-bold hover:bg-gray-800 disabled:bg-gray-400 transition cursor-pointer disabled:cursor-not-allowed"
           >
             {loading ? "확인중" : "입력"}
