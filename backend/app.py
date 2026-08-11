@@ -5,10 +5,8 @@ import random
 import pickle
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from sentence_transformers import SentenceTransformer
+from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.metrics.pairwise import cosine_similarity
-
-print("한국어 AI 모델을 불러오는 중...")
 
 app = FastAPI()
 
@@ -19,11 +17,6 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
-
-# =========================
-# AI 모델
-# =========================
-model = SentenceTransformer("jhgan/ko-sroberta-multitask")
 
 # =========================
 # 단어 데이터 로딩
@@ -54,7 +47,6 @@ def load_words_from_raw():
         with open(WORDS_LARGE_FILE, "r", encoding="utf-8") as f:
             for line in f:
                 word = line.strip()
-                # 1글자 이상, 공백 없는 단어 허용
                 if word and " " not in word and len(word) >= 1:
                     word_set.add(word)
     else:
@@ -74,42 +66,22 @@ def load_words_from_raw():
     return sorted(list(word_set))
 
 WORD_LIST = load_words_from_raw()
-WORD_SET = set(WORD_LIST)
 
 if not WORD_LIST:
     print("경고: data/raw 폴더에서 단어를 찾지 못했습니다. 기본 단어를 사용합니다.")
     WORD_LIST = ["소방관", "소방서", "화재", "진화", "안전", "물", "불"]
-    WORD_SET = set(WORD_LIST)
     ANSWER_LIST = WORD_LIST
 
+WORD_SET = set(WORD_LIST)
 print("로드된 전체 단어 수:", len(WORD_LIST))
 
 # =========================
-# 임베딩 생성 및 캐싱
+# TF-IDF 벡터 생성 (메모리 최적화)
 # =========================
-WORD_VECTORS = None
-
-if os.path.exists(CACHE_FILE):
-    try:
-        print("기존 임베딩 캐시 파일(word_vectors.pkl)을 확인하는 중...")
-        with open(CACHE_FILE, "rb") as f:
-            cache_data = pickle.load(f)
-            
-        if cache_data.get("words") == WORD_LIST:
-            WORD_VECTORS = cache_data["vectors"]
-            print("⚡ 캐시 파일에서 임베딩을 초고속으로 로드했습니다!")
-        else:
-            print("🔄 단어장에 변경사항이 감지되었습니다. 임베딩을 다시 계산합니다...")
-    except Exception as e:
-        print(f"⚠️ 캐시 로드 중 오류 발생({e}). 임베딩을 다시 생성합니다.")
-
-if WORD_VECTORS is None:
-    print("단어 임베딩 생성 중... (단어 수가 많으면 시간이 다소 걸릴 수 있습니다)")
-    WORD_VECTORS = model.encode(WORD_LIST, show_progress_bar=True)
-    
-    with open(CACHE_FILE, "wb") as f:
-        pickle.dump({"words": WORD_LIST, "vectors": WORD_VECTORS}, f)
-    print("💾 임베딩 계산 및 word_vectors.pkl 캐시 저장 완료!")
+print("TF-IDF 단어 벡터 계산 중...")
+vectorizer = TfidfVectorizer(analyzer="char", ngram_range=(1, 2))
+WORD_VECTORS = vectorizer.fit_transform(WORD_LIST)
+print("⚡ TF-IDF 벡터화 완료!")
 
 # =========================
 # 오늘의 정답
@@ -131,13 +103,15 @@ def create_ranking():
     global RANKS, SCORES, SORTED_RANK_LIST
     result = []
 
-    for idx, word_vector in enumerate(WORD_VECTORS):
-        score = cosine_similarity([ANSWER_VECTOR], [word_vector])[0][0]
-        score = round(float(score) * 1000)
+    # 전체 유사도 한번에 계산 (속도 최적화)
+    similarities = cosine_similarity(ANSWER_VECTOR, WORD_VECTORS)[0]
+
+    for idx, score in enumerate(similarities):
+        score_val = round(float(score) * 1000)
         word = WORD_LIST[idx]
 
-        SCORES[word] = score
-        result.append({"word": word, "score": score})
+        SCORES[word] = score_val
+        result.append({"word": word, "score": score_val})
 
     result.sort(key=lambda x: x["score"], reverse=True)
 
