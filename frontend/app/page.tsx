@@ -120,21 +120,14 @@ export default function Home() {
       return;
     }
 
-    // 💡 이미 입력한 단어인지 확인
+    // 💡 1. 이미 입력한 단어인지 확인
     const existingGuess = guesses.find((g) => g.word === trimmedInput);
     if (existingGuess) {
       const rankText = existingGuess.rank === 9999 ? "10,000위 밖" : `${existingGuess.rank}위`;
       
-      // 1) 상단 메시지로 점수와 순위 명확히 알림
-      setMessage(`ℹ️ 이미 입력했던 단어입니다. (점수: ${existingGuess.score}점 / 순위: ${rankText})`);
+      // 이미 입력한 단어도 상단 메시지로 알림 (정렬 순서는 그대로 유두)
+      setMessage(`ℹ️ 이미 입력했던 단어입니다. (${trimmedInput} - 점수: ${existingGuess.score}점 / 순위: ${rankText})`);
       setInput("");
-
-      // 2) 목록의 최상단으로 끌어올리기 (해당 단어를 맨 앞으로)
-      setGuesses((prev) => [
-        existingGuess,
-        ...prev.filter((g) => g.word !== trimmedInput),
-      ]);
-      
       setTimeout(() => inputRef.current?.focus(), 50);
       return;
     }
@@ -166,18 +159,23 @@ export default function Home() {
         rank: result.rank,
       };
 
-      // 신규 제출 단어를 최상단에 추가한 후 점수순 정렬
+      // 💡 2. 신규 제출 단어를 추가한 후 높은 점수순(내림차순) 정렬
       setGuesses((prev) => [...prev, newGuess].sort((a, b) => b.score - a.score));
       setInput("");
 
+      const rankText = result.rank === 9999 ? "10,000위 밖" : `${result.rank}위`;
+
+      // 💡 3. 정답 여부에 따른 상단 메시지 표기 (신규 단어도 점수 및 랭크 표기)
       if (result.answer) {
-        setMessage("🎉 정답입니다! 축하합니다!");
+        setMessage(`🎉 정답입니다! (${trimmedInput} - 점수: ${result.score}점 / 순위: ${rankText})`);
         setIsGameWon(true);
 
         const today = new Date().toISOString().slice(0, 10);
         const newGameCount = completedGames + 1;
         setCompletedGames(newGameCount);
         localStorage.setItem("game_play_limit", JSON.stringify({ date: today, games: newGameCount }));
+      } else {
+        setMessage(`💡 [${trimmedInput}] 점수: ${result.score}점 / 순위: ${rankText}`);
       }
     } catch (error) {
       console.error(error);
@@ -237,7 +235,9 @@ export default function Home() {
 
         {message && (
           <div className="mt-1 flex flex-col items-center gap-2 w-full">
-            <p className="text-sm font-semibold text-center text-red-500">{message}</p>
+            <p className="text-sm font-semibold text-center text-indigo-600 bg-indigo-50 px-4 py-2 rounded-lg w-full border border-indigo-100">
+              {message}
+            </p>
             {isGameWon && (
               <div className="flex gap-2 mt-1">
                 <button
