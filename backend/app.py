@@ -24,12 +24,12 @@ app.add_middleware(
 def calculate_score(similarity: float) -> int:
     """
     코사인 유사도(-1.0 ~ 1.0)를 꼬맨틀 스타일의 점수(0 ~ 1000점)로 비선형 변환합니다.
-    (유사도가 0.4~0.6 수준이어도 600~800점대로 매끄럽게 상승시킵니다.)
+    (상위 유사도 어휘가 700~900점대에 형성되도록 보정)
     """
     if similarity <= 0:
         return 0
-    # 지수 0.55를 적용해 상위 유사도 점수를 대폭 보정
-    scaled = math.pow(similarity, 0.55) * 1000
+    # 지수를 0.55에서 0.35로 조정하여 상위권 점수를 700~900점대로 상향
+    scaled = math.pow(similarity, 0.35) * 1000
     return min(1000, max(0, int(scaled)))
 
 # =========================
