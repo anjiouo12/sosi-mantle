@@ -120,9 +120,22 @@ export default function Home() {
       return;
     }
 
-    if (guesses.some((g) => g.word === trimmedInput)) {
-      setMessage("이미 입력한 단어입니다.");
+    // 💡 이미 입력한 단어인지 확인
+    const existingGuess = guesses.find((g) => g.word === trimmedInput);
+    if (existingGuess) {
+      const rankText = existingGuess.rank === 9999 ? "10,000위 밖" : `${existingGuess.rank}위`;
+      
+      // 1) 상단 메시지로 점수와 순위 명확히 알림
+      setMessage(`ℹ️ 이미 입력했던 단어입니다. (점수: ${existingGuess.score}점 / 순위: ${rankText})`);
       setInput("");
+
+      // 2) 목록의 최상단으로 끌어올리기 (해당 단어를 맨 앞으로)
+      setGuesses((prev) => [
+        existingGuess,
+        ...prev.filter((g) => g.word !== trimmedInput),
+      ]);
+      
+      setTimeout(() => inputRef.current?.focus(), 50);
       return;
     }
 
@@ -153,6 +166,7 @@ export default function Home() {
         rank: result.rank,
       };
 
+      // 신규 제출 단어를 최상단에 추가한 후 점수순 정렬
       setGuesses((prev) => [...prev, newGuess].sort((a, b) => b.score - a.score));
       setInput("");
 
@@ -258,13 +272,15 @@ export default function Home() {
             return (
               <div
                 key={g.word}
-                className="bg-gray-50 p-3 rounded-xl border border-gray-100 flex flex-col gap-1 shadow-sm"
+                className="bg-gray-50 p-3 rounded-xl border border-gray-100 flex flex-col gap-1 shadow-sm transition-all"
               >
                 <div className="flex justify-between items-center text-sm font-bold">
                   <span className="flex items-center gap-1.5 text-gray-800">
                     <span>{emoji}</span>
                     <span>{g.word}</span>
-                    <span className="text-xs text-gray-400 font-normal">({g.rank}위)</span>
+                    <span className="text-xs text-gray-400 font-normal">
+                      ({g.rank === 9999 ? "10,000위 밖" : `${g.rank}위`})
+                    </span>
                   </span>
                   <span className={`${text}`}>{g.score}점</span>
                 </div>
