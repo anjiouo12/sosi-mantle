@@ -3,6 +3,7 @@ import glob
 import json
 import random
 import pickle
+import math
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from gensim.models import Word2Vec
@@ -16,6 +17,20 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# =========================
+# 점수 스케일링 함수 (꼬맨틀 스타일 비선형 보정)
+# =========================
+def calculate_score(similarity: float) -> int:
+    """
+    코사인 유사도(-1.0 ~ 1.0)를 꼬맨틀 스타일의 점수(0 ~ 1000점)로 비선형 변환합니다.
+    (유사도가 0.4~0.6 수준이어도 600~800점대로 매끄럽게 상승시킵니다.)
+    """
+    if similarity <= 0:
+        return 0
+    # 지수 0.55를 적용해 상위 유사도 점수를 대폭 보정
+    scaled = math.pow(similarity, 0.55) * 1000
+    return min(1000, max(0, int(scaled)))
 
 # =========================
 # 경로 및 파일 로딩
@@ -102,7 +117,8 @@ def create_ranking():
         if not is_valid_word(word) or word == ANSWER:
             continue
             
-        score_val = max(0, int(sim_score * 1000))
+        # 스케일링 함수 적용
+        score_val = calculate_score(sim_score)
         if word not in SCORES:
             SCORES[word] = score_val
             RANKS[word] = current_rank
@@ -168,9 +184,9 @@ def guess(data: dict):
         score = SCORES[user_word]
         rank = RANKS[user_word]
     else:
-        # 상위 10,000위 밖의 단어 유사도 실시간 계산
+        # 상위 10,000위 밖의 단어 유사도 실시간 스케일링 계산
         sim = wv_model.similarity(ANSWER, user_word)
-        score = max(0, int(sim * 1000))
+        score = calculate_score(sim)
         rank = 9999
 
     return {
