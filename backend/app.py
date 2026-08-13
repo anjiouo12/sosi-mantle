@@ -5,8 +5,7 @@ import random
 import pickle
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from sklearn.feature_extraction.text import TfidfVectorizer
-from sklearn.metrics.pairwise import cosine_similarity
+from gensim.models import Word2Vec
 
 app = FastAPI()
 
@@ -19,13 +18,12 @@ app.add_middleware(
 )
 
 # =========================
-# 단어 데이터 로딩
+# 단어 데이터 및 모델 로딩
 # =========================
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 RAW_DATA_DIR = os.path.join(BASE_DIR, "data", "raw")
-CACHE_FILE = os.path.join(BASE_DIR, "word_vectors.pkl")
-WORDS_LARGE_FILE = os.path.join(RAW_DATA_DIR, "words_large.txt")
 ANSWERS_FILE = os.path.join(RAW_DATA_DIR, "answers.txt")
+MODEL_PATH = os.path.join(BASE_DIR, "word2vec.model")
 
 def load_answers():
     """answers.txt에서 소방 정답 단어 목록을 로드합니다."""
@@ -38,91 +36,90 @@ def load_answers():
 
 ANSWER_LIST = load_answers()
 
-def load_words_from_raw():
-    """words_large.txt에서 전체 추측 단어를 로드합니다 (1글자 이상 허용)."""
-    word_set = set()
-    
-    # 1. words_large.txt가 존재하면 우선 로드
-    if os.path.exists(WORDS_LARGE_FILE):
-        with open(WORDS_LARGE_FILE, "r", encoding="utf-8") as f:
-            for line in f:
-                word = line.strip()
-                if word and " " not in word and len(word) >= 1:
-                    word_set.add(word)
-    else:
-        # words_large.txt가 없을 경우 raw 폴더의 모든 txt 로드
-        txt_files = glob.glob(os.path.join(RAW_DATA_DIR, "*.txt"))
-        for file_path in txt_files:
-            with open(file_path, "r", encoding="utf-8") as f:
-                for line in f:
-                    word = line.strip()
-                    if word and " " not in word and len(word) >= 1:
-                        word_set.add(word)
-
-    # 2. 정답 단어(answers)도 추측 가능 단어장에 포함 보장
-    for ans in ANSWER_LIST:
-        word_set.add(ans)
-                    
-    return sorted(list(word_set))
-
-WORD_LIST = load_words_from_raw()
-
-if not WORD_LIST:
-    print("경고: data/raw 폴더에서 단어를 찾지 못했습니다. 기본 단어를 사용합니다.")
-    WORD_LIST = ["소방관", "소방서", "화재", "진화", "안전", "물", "불"]
-    ANSWER_LIST = WORD_LIST
-
-WORD_SET = set(WORD_LIST)
-print("로드된 전체 단어 수:", len(WORD_LIST))
-
 # =========================
-# TF-IDF 벡터 생성 (메모리 최적화)
+# Word2Vec 모델 로드
 # =========================
-print("TF-IDF 단어 벡터 계산 중...")
-vectorizer = TfidfVectorizer(analyzer="char", ngram_range=(1, 2))
-WORD_VECTORS = vectorizer.fit_transform(WORD_LIST)
-print("⚡ TF-IDF 벡터화 완료!")
+print("🧠 Word2Vec 의미 기반 모델 로딩 중...")
+try:
+    model_obj = Word2Vec.load(MODEL_PATH)
+    wv_model = model_obj.wv
+    print("⚡ Word2Vec 모델 로딩 완료!")
+except Exception as e:
+    print(f"⚠️ 모델 로드 실패: {e}")
+    wv_model = None
+
+# 단어장에 포함시킬 후보군 구성 (모델 내 단어들 우선)
+WORD_SET = set(wv_model.key_to_index.keys()) if wv_model else set()
+for ans in ANSWER_LIST:
+    if wv_model and ans in wv_model:
+        WORD_SET.add(ans)
+
+print("로드된 사전 단어 수:", len(WORD_SET))
+
+# 불필요한 조사/어미 끝자리 필터링 함수
+INVALID_ENDINGS = ("한다", "이다", "했다", "이며", "에서", "으로", "로써")
+def is_valid_word(word):
+    if any(word.endswith(ending) for ending in INVALID_ENDINGS):
+        return False
+    return True
 
 # =========================
 # 오늘의 정답 & 랭킹 생성
 # =========================
 ANSWER = random.choice(ANSWER_LIST)
-ANSWER_INDEX = WORD_LIST.index(ANSWER) if ANSWER in WORD_LIST else 0
-ANSWER_VECTOR = WORD_VECTORS[ANSWER_INDEX]
 
 RANKS = {}
 SCORES = {}
 SORTED_RANK_LIST = []
 
 def create_ranking():
-    global RANKS, SCORES, SORTED_RANK_LIST, ANSWER, ANSWER_INDEX, ANSWER_VECTOR
+    global RANKS, SCORES, SORTED_RANK_LIST, ANSWER
     
     RANKS = {}
     SCORES = {}
-    result = []
-
-    # 전체 유사도 한번에 계산 (속도 최적화)
-    similarities = cosine_similarity(ANSWER_VECTOR, WORD_VECTORS)[0]
-
-    for idx, score in enumerate(similarities):
-        score_val = round(float(score) * 1000)
-        word = WORD_LIST[idx]
-
-        SCORES[word] = score_val
-        result.append({"word": word, "score": score_val})
-
-    result.sort(key=lambda x: x["score"], reverse=True)
-
     SORTED_RANK_LIST = []
-    for rank, item in enumerate(result, start=1):
-        RANKS[item["word"]] = rank
-        SORTED_RANK_LIST.append({
-            "rank": rank,
-            "word": item["word"],
-            "score": item["score"]
-        })
 
-    print(f"🎯 정답 설정 완료: {ANSWER} (랭킹 생성 완료: {len(RANKS)})")
+    if not wv_model:
+        print("⚠️ 모델이 로드되지 않아 랭킹을 생성할 수 없습니다.")
+        return
+
+    # 🔧 [수정] 정답 단어가 모델 사전에 없을 경우, 모델에 있는 단어로 계속 다시 무작위 추출
+    while ANSWER not in wv_model:
+        print(f"⚠️ 정답 '{ANSWER}'이(가) 모델 사전에 없습니다. 다른 단어를 선택합니다.")
+        valid_answers = [w for w in ANSWER_LIST if w in wv_model]
+        if valid_answers:
+            ANSWER = random.choice(valid_answers)
+        else:
+            # answers.txt의 모든 단어가 모델에 없을 경우 모델 내 임의 단어 1개 선택
+            ANSWER = random.choice(list(wv_model.key_to_index.keys()))
+
+    print(f"🎯 최종 정답 설정 완료: {ANSWER}")
+
+    # 의미 유사도(Cosine Similarity) 기준 상위 10,000개 단어 추출
+    similar_words = wv_model.most_similar(ANSWER, topn=10000)
+    
+    # 1위 정답 자신 등록
+    RANKS[ANSWER] = 1
+    SCORES[ANSWER] = 1000
+    SORTED_RANK_LIST.append({"rank": 1, "word": ANSWER, "score": 1000})
+
+    current_rank = 2
+    for word, sim_score in similar_words:
+        if not is_valid_word(word):
+            continue
+            
+        score_val = max(0, int(sim_score * 1000))
+        SCORES[word] = score_val
+        RANKS[word] = current_rank
+        
+        SORTED_RANK_LIST.append({
+            "rank": current_rank,
+            "word": word,
+            "score": score_val
+        })
+        current_rank += 1
+
+    print(f"✅ 의미 기반 랭킹 생성 완료 (상위 단어 수: {len(SORTED_RANK_LIST)})")
 
 # 초기 랭킹 계산
 create_ranking()
@@ -134,7 +131,7 @@ create_ranking()
 def home():
     return {
         "message": "소시맨틀 AI 서버 정상 작동",
-        "words": len(WORD_LIST)
+        "words": len(WORD_SET)
     }
 
 @app.get("/daily")
@@ -157,7 +154,7 @@ def guess(data: dict):
             "message": "단어를 입력해주세요."
         }
 
-    if user_word not in WORD_SET:
+    if not wv_model or user_word not in wv_model:
         return {
             "word": user_word,
             "score": 0,
@@ -167,9 +164,19 @@ def guess(data: dict):
             "message": "사전에 등록되지 않은 단어입니다."
         }
 
-    score = SCORES.get(user_word, 0)
-    rank = RANKS.get(user_word, None)
     is_answer = (user_word == ANSWER)
+
+    if is_answer:
+        score = 1000
+        rank = 1
+    elif user_word in SCORES:
+        score = SCORES[user_word]
+        rank = RANKS[user_word]
+    else:
+        # 상위 10,000위 밖의 단어 점수 실시간 계산
+        sim = wv_model.similarity(ANSWER, user_word)
+        score = max(0, int(sim * 1000))
+        rank = 9999
 
     return {
         "word": user_word,
@@ -189,15 +196,13 @@ def get_top_ranks(limit: int = 100):
         "top_ranks": SORTED_RANK_LIST[:limit]
     }
 
-# --- [신규] 정답 무작위 변경 및 랭킹 재계산 엔드포인트 ---
+# --- 정답 무작위 변경 및 랭킹 재계산 엔드포인트 ---
 @app.post("/reset-answer")
 def reset_answer():
-    global ANSWER, ANSWER_INDEX, ANSWER_VECTOR
+    global ANSWER
     
-    # ANSWER_LIST 중 무작위 선택
-    ANSWER = random.choice(ANSWER_LIST)
-    ANSWER_INDEX = WORD_LIST.index(ANSWER) if ANSWER in WORD_LIST else 0
-    ANSWER_VECTOR = WORD_VECTORS[ANSWER_INDEX]
+    valid_answers = [w for w in ANSWER_LIST if wv_model and w in wv_model]
+    ANSWER = random.choice(valid_answers) if valid_answers else random.choice(ANSWER_LIST)
     
     # 새 정답 기준으로 랭킹 재계산
     create_ranking()

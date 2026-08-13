@@ -4,3 +4,4 @@ kiwipiepy
 numpy
 scikit-learn
 pydantic
+gensim
