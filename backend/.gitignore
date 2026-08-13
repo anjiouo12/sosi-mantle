@@ -1,0 +1,10 @@
+# 가상환경 및 캐시
+venv/
+__pycache__/
+
+# 대용량 FastText/Word2Vec 베이스 모델 파일 (GitHub 용량 초과 방지)
+cc.ko.300.bin
+cc.ko.300.bin.gz
+ko.bin
+*.bin
+*.gz
