@@ -150,6 +150,10 @@ def guess(data: dict):
     if not user_word:
         return {"word": "", "score": 0, "rank": None, "answer": False, "exists": False, "message": "단어를 입력해주세요."}
 
+    # 문자열 완전 일치 검사
+    if user_word == ANSWER:
+        return {"word": user_word, "exists": True, "score": 1000, "rank": 1, "answer": True}
+
     # [핵심 보정] 정답 여부 최우선 판단
     if user_word == ANSWER:
         return {"word": user_word, "exists": True, "score": 1000, "rank": 1, "answer": True}

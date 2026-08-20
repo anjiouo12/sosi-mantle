@@ -74,7 +74,7 @@ export default function Home() {
     }
   }
 
-  // 다음 문제로 넘어가는 정답 리셋 함수
+  // 다음 문제 도전 시 전체 게임 상태 리셋
   async function handleNextGame() {
     if (completedGames >= 3) {
       alert("오늘 할당된 3번의 기회를 모두 완료하셨습니다!");
@@ -89,7 +89,7 @@ export default function Home() {
       if (res.ok) {
         setGuesses([]);
         setIsGameWon(false);
-        setMessage("");
+        setMessage("🔄 새로운 문제가 준비되었습니다!");
         setInput("");
         setTimeout(() => inputRef.current?.focus(), 50);
       } else {
@@ -120,12 +120,10 @@ export default function Home() {
       return;
     }
 
-    // 💡 1. 이미 입력한 단어인지 확인
+    // 1. 이미 입력한 단어인지 확인
     const existingGuess = guesses.find((g) => g.word === trimmedInput);
     if (existingGuess) {
-      const rankText = existingGuess.rank === 9999 ? "10,000위 밖" : `${existingGuess.rank}위`;
-      
-      // 이미 입력한 단어도 상단 메시지로 알림
+      const rankText = existingGuess.rank === 1 ? "1위 (정답)" : existingGuess.rank === 9999 ? "10,000위 밖" : `${existingGuess.rank}위`;
       setMessage(`ℹ️ 이미 입력했던 단어입니다. (${trimmedInput} - 점수: ${existingGuess.score}점 / 순위: ${rankText})`);
       setInput("");
       setTimeout(() => inputRef.current?.focus(), 50);
@@ -159,15 +157,15 @@ export default function Home() {
         rank: result.rank,
       };
 
-      // 💡 2. 신규 제출 단어를 추가한 후 높은 점수순(내림차순) 정렬
+      // 2. 신규 제출 단어를 추가한 후 높은 점수순 정렬
       setGuesses((prev) => [...prev, newGuess].sort((a, b) => b.score - a.score));
       setInput("");
 
-      const rankText = result.rank === 9999 ? "10,000위 밖" : `${result.rank}위`;
+      const rankText = result.rank === 1 ? "1위 (정답)" : result.rank === 9999 ? "10,000위 밖" : `${result.rank}위`;
 
-      // 💡 3. 정답 여부에 따른 상단 메시지 표기
+      // 3. 정답 여부 판단
       if (result.answer) {
-        setMessage(`🎉 정답입니다! (${trimmedInput} - 점수: ${result.score}점 / 순위: ${rankText})`);
+        setMessage(`🎉 정답입니다! (${trimmedInput} - 점수: 1000점 / 순위: 1위)`);
         setIsGameWon(true);
 
         const today = new Date().toISOString().slice(0, 10);
@@ -264,7 +262,7 @@ export default function Home() {
           </div>
         )}
 
-        {/* 입력 단어 목록 (꼬맨틀 스타일: 표 헤더 + 1줄 컴팩트) */}
+        {/* 입력 단어 목록 */}
         <div className="mt-6 w-full">
           {guesses.length > 0 && (
             <div className="flex items-center justify-between text-xs font-bold text-gray-500 px-3 py-1.5 border-b border-gray-200 mb-1 gap-2">
@@ -285,18 +283,15 @@ export default function Home() {
                   key={g.word}
                   className="bg-white px-3 py-2 rounded-lg border border-gray-200 flex items-center justify-between text-sm shadow-xs gap-2 hover:bg-gray-50 transition"
                 >
-                  {/* 1. 단어 */}
                   <div className="flex items-center gap-1 font-bold text-gray-800 w-28 shrink-0 truncate">
                     <span className="text-xs">{emoji}</span>
                     <span>{g.word}</span>
                   </div>
 
-                  {/* 2. 순위 */}
                   <div className="text-xs text-gray-500 w-20 shrink-0 text-center font-medium">
-                    {g.rank === 9999 ? "10,000위 밖" : `${g.rank}위`}
+                    {g.rank === 1 ? "1위 (정답)" : g.rank === 9999 ? "10,000위 밖" : `${g.rank}위`}
                   </div>
 
-                  {/* 3. 유사도 게이지 바 */}
                   <div className="flex-1 bg-gray-100 h-2 rounded-full overflow-hidden mx-1">
                     <div
                       className={`h-full ${color} transition-all duration-300 rounded-full`}
@@ -304,7 +299,6 @@ export default function Home() {
                     />
                   </div>
 
-                  {/* 4. 점수 */}
                   <div className={`font-bold text-xs w-12 text-right shrink-0 ${text}`}>
                     {g.score}점
                   </div>
