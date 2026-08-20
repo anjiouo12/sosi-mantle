@@ -35,6 +35,30 @@ ANSWER = ""
 RANKING_DICT = {}
 TOP_RANKS_LIST = []
 
+def find_model_key(word: str):
+    """
+    입력된 단어가 모델 사전에 없더라도 품사 태그(/NNG 등)가 붙은 키를 자동 탐색합니다.
+    """
+    if not model:
+        return None
+    if word in model:
+        return word
+    
+    # 형태소 분석 태그 붙은 키 탐색 (예: 화재 -> 화재/NNG, 화재/NNP)
+    possible_tags = ["/NNG", "/NNP", "/VV", "/VA", "/MAG"]
+    for tag in possible_tags:
+        tagged_word = word + tag
+        if tagged_word in model:
+            return tagged_word
+
+    # 키의 앞부분이 단어로 시작하는 경우 탐색
+    for key in model.index_to_key:
+        if key.split("/")[0] == word:
+            return key
+
+    return None
+
+
 def create_ranking_for_answer(target_word: str):
     global ANSWER, RANKING_DICT, TOP_RANKS_LIST
     ANSWER = target_word
@@ -43,33 +67,52 @@ def create_ranking_for_answer(target_word: str):
 
     print(f"🎯 새로운 정답 설정 완료: [{ANSWER}]")
 
-    if not model or ANSWER not in model:
-        print(f"⚠️ 경고: [{ANSWER}] 단어가 Word2Vec 모델 사전에 없습니다.")
+    target_key = find_model_key(ANSWER)
+
+    if not model or not target_key:
+        print(f"⚠️ 경고: [{ANSWER}] 단어(또는 관련 태그)가 Word2Vec 모델 사전에 없습니다.")
         return
 
     similarities = []
-    for word in model.index_to_key:
+    for key in model.index_to_key:
         try:
-            sim = float(model.similarity(ANSWER, word))
+            sim = float(model.similarity(target_key, key))
             score = int(round(max(0.0, sim) * 1000))
-            similarities.append((word, score))
+            # 사용자에게 보여줄 때는 품사 태그 제거 (/NNG -> '')
+            display_word = key.split("/")[0]
+            similarities.append((display_word, key, score))
         except KeyError:
             continue
 
-    similarities.sort(key=lambda x: x[1], reverse=True)
+    # 유사도 점수 기준 내림차순 정렬
+    similarities.sort(key=lambda x: x[2], reverse=True)
 
+    # 상위 순위 데이터 구축
     TOP_RANKS_LIST = []
-    for idx, (word, score) in enumerate(similarities[:10000], start=1):
-        if word == ANSWER:
+    seen_words = set()
+    rank = 1
+
+    for display_word, key, score in similarities:
+        if display_word in seen_words:
+            continue
+        seen_words.add(display_word)
+
+        if display_word == ANSWER:
             score = 1000
-            idx = 1
+            current_rank = 1
+        else:
+            current_rank = rank
+            rank += 1
 
-        rank_info = {"rank": idx, "score": score}
-        RANKING_DICT[word] = rank_info
+        RANKING_DICT[display_word] = {"rank": current_rank, "score": score}
 
-        if idx <= 100:
-            TOP_RANKS_LIST.append({"rank": idx, "word": word, "score": score})
+        if current_rank <= 100:
+            TOP_RANKS_LIST.append({"rank": current_rank, "word": display_word, "score": score})
 
+        if rank > 10000:
+            break
+
+    # 정답 단어 1위 강제 보정
     RANKING_DICT[ANSWER] = {"rank": 1, "score": 1000}
 
 
@@ -87,7 +130,6 @@ def startup_event():
 def guess(data: dict):
     user_word = data.get("guess", "").strip()
 
-    # 입력값이 비어있는 경우
     if not user_word:
         return {
             "word": "",
@@ -98,7 +140,7 @@ def guess(data: dict):
             "message": "단어를 입력해 주세요."
         }
 
-    # 1단계: 정답과 문자열이 정확히 일치하는지 검사 (최우선)
+    # 1. 정답 문자열 직접 일치 체크 (최우선)
     if user_word == ANSWER:
         return {
             "word": user_word,
@@ -108,8 +150,11 @@ def guess(data: dict):
             "answer": True
         }
 
-    # 2단계: 모델 사전에 단어가 존재하는지 검사
-    if not model or user_word not in model:
+    # 2. 모델 내 단어/태그 매핑 키 찾기
+    user_key = find_model_key(user_word)
+    answer_key = find_model_key(ANSWER)
+
+    if not model or not user_key:
         return {
             "word": user_word,
             "score": 0,
@@ -119,7 +164,7 @@ def guess(data: dict):
             "message": "사전에 등록되지 않은 단어입니다."
         }
 
-    # 3단계: 미리 계산된 1~10,000위 순위 사전(RANKING_DICT)에 있는지 검사
+    # 3. 1~10,000위 미리 계산된 사전 조회
     if user_word in RANKING_DICT:
         info = RANKING_DICT[user_word]
         return {
@@ -130,10 +175,14 @@ def guess(data: dict):
             "answer": False
         }
 
-    # 4단계: 사전에 존재하지만 10,000위 밖인 단어의 유사도 실시간 계산
+    # 4. 10,000위 밖 단어 실시간 유사도 계산
     try:
-        sim = float(model.similarity(ANSWER, user_word))
-        score = int(round(max(0.0, sim) * 1000))
+        if answer_key and user_key:
+            sim = float(model.similarity(answer_key, user_key))
+            score = int(round(max(0.0, sim) * 1000))
+        else:
+            score = 0
+
         return {
             "word": user_word,
             "exists": True,
@@ -142,14 +191,14 @@ def guess(data: dict):
             "answer": False
         }
     except Exception as e:
-        print(f"실시간 유사도 계산 중 오류 발생: {e}")
+        print(f"실시간 유사도 계산 에러: {e}")
         return {
             "word": user_word,
             "exists": False,
             "score": 0,
             "rank": None,
             "answer": False,
-            "message": "유사도 계산 처리 중 오류가 발생했습니다."
+            "message": "유사도 계산 중 오류가 발생했습니다."
         }
 
 
