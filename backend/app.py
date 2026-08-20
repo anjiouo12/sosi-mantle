@@ -138,7 +138,7 @@ def get_custom_word_similarity(target_word: str, custom_word: str) -> float:
     return 0.15
 
 # =========================
-# 오늘의 정답 & 랭킹 생성
+# 오늘의 정답 & 랭킹 생성 (상위 1,000위 기준)
 # =========================
 ANSWER = random.choice(ANSWER_LIST)
 
@@ -168,49 +168,46 @@ def create_ranking():
 
     print(f"🎯 최종 정답 설정 완료: {ANSWER}")
 
-    # 정답 자체 등록
-    RANKS[ANSWER] = 1
+    # 1. 정답 본인 등록
     SCORES[ANSWER] = 1000
-    SORTED_RANK_LIST.append({"rank": 1, "word": ANSWER, "score": 1000})
 
-    # 모델 내 유사 단어 상위 추출
+    # 2. 모델 내 유사 단어 추출 (상위 1,000개 대상)
     if ANSWER in wv_model:
-        similar_words = wv_model.most_similar(ANSWER, topn=10000)
+        similar_words = wv_model.most_similar(ANSWER, topn=1000)
     else:
-        # 정답 자체가 모델에 없는 커스텀 단어일 경우 추론으로 랭킹 산출
         temp_list = []
         for word in wv_model.key_to_index.keys():
             sim = get_custom_word_similarity(word, ANSWER)
             temp_list.append((word, sim))
         temp_list.sort(key=lambda x: x[1], reverse=True)
-        similar_words = temp_list[:10000]
+        similar_words = temp_list[:1000]
 
-    current_rank = 2
     for word, sim_score in similar_words:
         if not is_valid_word(word) or word == ANSWER:
             continue
-            
-        score_val = calculate_score(sim_score)
-        if word not in SCORES:
-            SCORES[word] = score_val
-            RANKS[word] = current_rank
-            
-            SORTED_RANK_LIST.append({
-                "rank": current_rank,
-                "word": word,
-                "score": score_val
-            })
-            current_rank += 1
+        SCORES[word] = calculate_score(sim_score)
 
-    # 커스텀 단어들도 랭킹 표에 동적 추가
+    # 3. 커스텀 단어 점수 산출 및 추가
     for c_word in CUSTOM_WORDS:
         if c_word not in SCORES and c_word != ANSWER:
             sim = get_custom_word_similarity(ANSWER, c_word)
-            score_val = calculate_score(sim)
-            SCORES[c_word] = score_val
-            RANKS[c_word] = 9999
+            SCORES[c_word] = calculate_score(sim)
 
-    print(f"✅ 의미 기반 랭킹 생성 완료 (상위 단어 수: {len(SORTED_RANK_LIST)})")
+    # 4. 전체 단어를 점수(Score) 기준으로 통합 정렬 및 상위 1,000위 배정
+    sorted_items = sorted(SCORES.items(), key=lambda x: x[1], reverse=True)
+
+    for idx, (word, score_val) in enumerate(sorted_items, start=1):
+        if idx <= 1000:
+            RANKS[word] = idx
+            SORTED_RANK_LIST.append({
+                "rank": idx,
+                "word": word,
+                "score": score_val
+            })
+        else:
+            RANKS[word] = 9999  # 1,000위 밖은 순위 없음 처리
+
+    print(f"✅ 의미 기반 랭킹 생성 완료 (상위 1,000위 범위 세팅 완료, 랭킹 리스트 수: {len(SORTED_RANK_LIST)})")
 
 # 초기 랭킹 계산
 create_ranking()
@@ -248,8 +245,6 @@ def guess(data: dict):
     # 1. 사전 완전 일치 검사 및 부분 단어(1글자 이상) 추론 검사
     is_custom_subword = False
     if user_word not in WORD_SET:
-        # 커스텀 단어 중에 입력 단어가 포함되어 있거나(예: '관리사' in '소방시설관리사'), 
-        # 반대로 입력 단어 안에 커스텀 단어가 포함된 경우 1글자 이상이면 정상 인식
         if any(user_word in c_word or c_word in user_word for c_word in CUSTOM_WORDS) and len(user_word) >= 1:
             is_custom_subword = True
         else:
@@ -269,13 +264,11 @@ def guess(data: dict):
         rank = 1
     elif user_word in SCORES:
         score = SCORES[user_word]
-        rank = RANKS[user_word]
+        rank = RANKS.get(user_word, 9999)
     else:
-        # 모델 사전 내 완전 존재 단어 유사도 계산
         if wv_model and user_word in wv_model and ANSWER in wv_model and not is_custom_subword:
             sim = wv_model.similarity(ANSWER, user_word)
         else:
-            # 커스텀 단어 및 1글자 이상 부분 단어 유사도 동적 추론
             sim = get_custom_word_similarity(ANSWER, user_word)
             
         score = calculate_score(sim)
