@@ -125,7 +125,7 @@ export default function Home() {
     if (existingGuess) {
       const rankText = existingGuess.rank === 9999 ? "10,000위 밖" : `${existingGuess.rank}위`;
       
-      // 이미 입력한 단어도 상단 메시지로 알림 (정렬 순서는 그대로 유두)
+      // 이미 입력한 단어도 상단 메시지로 알림
       setMessage(`ℹ️ 이미 입력했던 단어입니다. (${trimmedInput} - 점수: ${existingGuess.score}점 / 순위: ${rankText})`);
       setInput("");
       setTimeout(() => inputRef.current?.focus(), 50);
@@ -165,7 +165,7 @@ export default function Home() {
 
       const rankText = result.rank === 9999 ? "10,000위 밖" : `${result.rank}위`;
 
-      // 💡 3. 정답 여부에 따른 상단 메시지 표기 (신규 단어도 점수 및 랭크 표기)
+      // 💡 3. 정답 여부에 따른 상단 메시지 표기
       if (result.answer) {
         setMessage(`🎉 정답입니다! (${trimmedInput} - 점수: ${result.score}점 / 순위: ${rankText})`);
         setIsGameWon(true);
@@ -264,36 +264,54 @@ export default function Home() {
           </div>
         )}
 
-        <div className="mt-6 w-full space-y-3">
-          {guesses.map((g) => {
-            const { emoji, color, text } = getScoreBadge(g.rank, g.score);
-            const progressPercent = Math.min(Math.max((g.score / 1000) * 100, 5), 100);
+        {/* 입력 단어 목록 (꼬맨틀 스타일: 표 헤더 + 1줄 컴팩트) */}
+        <div className="mt-6 w-full">
+          {guesses.length > 0 && (
+            <div className="flex items-center justify-between text-xs font-bold text-gray-500 px-3 py-1.5 border-b border-gray-200 mb-1 gap-2">
+              <span className="w-28 shrink-0">추측한 단어</span>
+              <span className="w-20 shrink-0 text-center">순위</span>
+              <span className="flex-1 text-center">유사도 게이지</span>
+              <span className="w-12 shrink-0 text-right">점수</span>
+            </div>
+          )}
 
-            return (
-              <div
-                key={g.word}
-                className="bg-gray-50 p-3 rounded-xl border border-gray-100 flex flex-col gap-1 shadow-sm transition-all"
-              >
-                <div className="flex justify-between items-center text-sm font-bold">
-                  <span className="flex items-center gap-1.5 text-gray-800">
-                    <span>{emoji}</span>
+          <div className="space-y-1">
+            {guesses.map((g) => {
+              const { emoji, color, text } = getScoreBadge(g.rank, g.score);
+              const progressPercent = Math.min(Math.max((g.score / 1000) * 100, 3), 100);
+
+              return (
+                <div
+                  key={g.word}
+                  className="bg-white px-3 py-2 rounded-lg border border-gray-200 flex items-center justify-between text-sm shadow-xs gap-2 hover:bg-gray-50 transition"
+                >
+                  {/* 1. 단어 */}
+                  <div className="flex items-center gap-1 font-bold text-gray-800 w-28 shrink-0 truncate">
+                    <span className="text-xs">{emoji}</span>
                     <span>{g.word}</span>
-                    <span className="text-xs text-gray-400 font-normal">
-                      ({g.rank === 9999 ? "10,000위 밖" : `${g.rank}위`})
-                    </span>
-                  </span>
-                  <span className={`${text}`}>{g.score}점</span>
-                </div>
+                  </div>
 
-                <div className="w-full bg-gray-200 h-2.5 rounded-full overflow-hidden mt-1">
-                  <div
-                    className={`h-full ${color} transition-all duration-500 rounded-full`}
-                    style={{ width: `${progressPercent}%` }}
-                  />
+                  {/* 2. 순위 */}
+                  <div className="text-xs text-gray-500 w-20 shrink-0 text-center font-medium">
+                    {g.rank === 9999 ? "10,000위 밖" : `${g.rank}위`}
+                  </div>
+
+                  {/* 3. 유사도 게이지 바 */}
+                  <div className="flex-1 bg-gray-100 h-2 rounded-full overflow-hidden mx-1">
+                    <div
+                      className={`h-full ${color} transition-all duration-300 rounded-full`}
+                      style={{ width: `${progressPercent}%` }}
+                    />
+                  </div>
+
+                  {/* 4. 점수 */}
+                  <div className={`font-bold text-xs w-12 text-right shrink-0 ${text}`}>
+                    {g.score}점
+                  </div>
                 </div>
-              </div>
-            );
-          })}
+              );
+            })}
+          </div>
         </div>
       </div>
 
