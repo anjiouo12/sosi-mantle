@@ -97,8 +97,6 @@ def create_ranking():
     valid_answers = [w for w in ANSWER_LIST if w in WORD_SET]
     ANSWER = random.choice(valid_answers) if valid_answers else random.choice(list(WORD_SET))
 
-    SCORES[ANSWER] = 1000
-
     # 유사 단어 점수 계산
     if ANSWER in wv_model:
         similar_words = wv_model.most_similar(ANSWER, topn=1000)
@@ -115,9 +113,18 @@ def create_ranking():
         if c_word not in SCORES and c_word != ANSWER:
             SCORES[c_word] = calculate_score(get_custom_word_similarity(ANSWER, c_word))
 
-    # 통합 정렬 및 순위 지정
-    sorted_items = sorted(SCORES.items(), key=lambda x: x[1], reverse=True)
-    for idx, (w, score) in enumerate(sorted_items, start=1):
+    # [핵심 보정] 정답 단어 본인은 무조건 1000점 및 1위 고정
+    SCORES[ANSWER] = 1000
+    RANKS[ANSWER] = 1
+
+    # 정답 외 단어 정렬
+    other_items = [(w, score) for w, score in SCORES.items() if w != ANSWER]
+    other_items.sort(key=lambda x: x[1], reverse=True)
+
+    # 1위(정답)부터 리스트 생성
+    SORTED_RANK_LIST = [{"rank": 1, "word": ANSWER, "score": 1000}]
+
+    for idx, (w, score) in enumerate(other_items, start=2):
         if idx <= 1000:
             RANKS[w] = idx
             SORTED_RANK_LIST.append({"rank": idx, "word": w, "score": score})
@@ -143,6 +150,10 @@ def guess(data: dict):
     if not user_word:
         return {"word": "", "score": 0, "rank": None, "answer": False, "exists": False, "message": "단어를 입력해주세요."}
 
+    # [핵심 보정] 정답 여부 최우선 판단
+    if user_word == ANSWER:
+        return {"word": user_word, "exists": True, "score": 1000, "rank": 1, "answer": True}
+
     is_custom_subword = False
     if user_word not in WORD_SET:
         if any(user_word in c or c in user_word for c in CUSTOM_WORDS) and len(user_word) >= 1:
@@ -150,11 +161,7 @@ def guess(data: dict):
         else:
             return {"word": user_word, "score": 0, "rank": None, "answer": False, "exists": False, "message": "사전에 등록되지 않은 단어입니다."}
 
-    is_answer = (user_word == ANSWER)
-
-    if is_answer:
-        score, rank = 1000, 1
-    elif user_word in SCORES:
+    if user_word in SCORES:
         score = SCORES[user_word]
         rank = RANKS.get(user_word, 9999)
     else:
@@ -164,7 +171,7 @@ def guess(data: dict):
             sim = get_custom_word_similarity(ANSWER, user_word)
         score, rank = calculate_score(sim), 9999
 
-    return {"word": user_word, "exists": True, "score": score, "rank": rank, "answer": is_answer}
+    return {"word": user_word, "exists": True, "score": score, "rank": rank, "answer": False}
 
 @app.get("/top-ranks")
 def get_top_ranks(limit: int = 100):
