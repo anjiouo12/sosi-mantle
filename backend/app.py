@@ -104,11 +104,11 @@ def is_valid_word(word):
     return True
 
 # =========================
-# 모델 미등록 합성어(커스텀 단어)의 유사도 추론 함수
+# 모델 미등록 합성어/부분단어 유사도 추론 함수
 # =========================
 def get_custom_word_similarity(target_word: str, custom_word: str) -> float:
     """
-    Word2Vec 모델에 없는 복합 단어(예: 한국소방시설협회)를 
+    Word2Vec 모델에 없는 복합 단어 및 부분 단어(1글자 포함)를 
     부분 형태소/키워드 벡터 평균을 통해 정답 단어와의 코사인 유사도로 추론합니다.
     """
     if not wv_model or target_word not in wv_model:
@@ -116,10 +116,10 @@ def get_custom_word_similarity(target_word: str, custom_word: str) -> float:
 
     target_vec = wv_model[target_word]
 
-    # 모델에서 찾을 수 있는 키워드 부분 검색 (2글자 이상)
+    # 모델에서 찾을 수 있는 키워드 부분 검색 (1글자 이상 허용)
     matched_vectors = []
     for key in wv_model.key_to_index.keys():
-        if len(key) >= 2 and key in custom_word:
+        if len(key) >= 1 and (key in custom_word or custom_word in key):
             matched_vectors.append(wv_model[key])
 
     # 부분 키워드 매칭이 성공한 경우 평균 벡터 사용
@@ -208,7 +208,6 @@ def create_ranking():
             sim = get_custom_word_similarity(ANSWER, c_word)
             score_val = calculate_score(sim)
             SCORES[c_word] = score_val
-            # 커스텀 단어는 기본적으로 상위 10,000위 외 배치 후 개별 검색 가능
             RANKS[c_word] = 9999
 
     print(f"✅ 의미 기반 랭킹 생성 완료 (상위 단어 수: {len(SORTED_RANK_LIST)})")
@@ -246,16 +245,22 @@ def guess(data: dict):
             "message": "단어를 입력해주세요."
         }
 
-    # 사전에 아예 없는 경우 (모델에도 없고 커스텀 사전에도 없는 일반 없는 단어)
+    # 1. 사전 완전 일치 검사 및 부분 단어(1글자 이상) 추론 검사
+    is_custom_subword = False
     if user_word not in WORD_SET:
-        return {
-            "word": user_word,
-            "score": 0,
-            "rank": None,
-            "answer": False,
-            "exists": False,
-            "message": "사전에 등록되지 않은 단어입니다."
-        }
+        # 커스텀 단어 중에 입력 단어가 포함되어 있거나(예: '관리사' in '소방시설관리사'), 
+        # 반대로 입력 단어 안에 커스텀 단어가 포함된 경우 1글자 이상이면 정상 인식
+        if any(user_word in c_word or c_word in user_word for c_word in CUSTOM_WORDS) and len(user_word) >= 1:
+            is_custom_subword = True
+        else:
+            return {
+                "word": user_word,
+                "score": 0,
+                "rank": None,
+                "answer": False,
+                "exists": False,
+                "message": "사전에 등록되지 않은 단어입니다."
+            }
 
     is_answer = (user_word == ANSWER)
 
@@ -266,11 +271,11 @@ def guess(data: dict):
         score = SCORES[user_word]
         rank = RANKS[user_word]
     else:
-        # 모델 사전 내 존재 단어 유사도 계산
-        if wv_model and user_word in wv_model and ANSWER in wv_model:
+        # 모델 사전 내 완전 존재 단어 유사도 계산
+        if wv_model and user_word in wv_model and ANSWER in wv_model and not is_custom_subword:
             sim = wv_model.similarity(ANSWER, user_word)
         else:
-            # 커스텀 단어 유사도 동적 추론
+            # 커스텀 단어 및 1글자 이상 부분 단어 유사도 동적 추론
             sim = get_custom_word_similarity(ANSWER, user_word)
             
         score = calculate_score(sim)
